@@ -112,6 +112,7 @@ a{color:var(--blue)}
       <button data-p="uni">University</button>
       <button data-p="prog">Programs</button>
     </nav>
+    <button class="btn ghost" id="refresh" title="Reload latest data from the sheet" style="color:#fff;border-color:#ffffff55">Refresh data</button>
     <button class="btn ghost" id="logout" style="color:#fff;border-color:#ffffff55">Log out</button>
   </header>
   <main id="view"><div class="loading">Loading…</div></main>
@@ -178,22 +179,45 @@ $('#loginForm').addEventListener('submit', async function (e) {
   var b = $('#loginBtn'), er = $('#loginErr'); er.textContent = ''; b.disabled = true; b.textContent = 'Checking…';
   try {
     var j = await api('login', { password: $('#pw').value });
-    saveToken(j.token); await start();
+    saveToken(j.token); await start(j.data);
   } catch (x) { er.textContent = x.message; }
   b.disabled = false; b.textContent = 'Log in';
 });
-$('#logout').addEventListener('click', function () { saveToken(null); B = null; showLogin(); });
+$('#logout').addEventListener('click', function () { saveToken(null); B = null; try { sessionStorage.removeItem('ums_boot'); } catch (e) {} showLogin(); });
 
-async function start() {
-  $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
-  $('#view').innerHTML = '<div class="loading">Loading data…</div>';
-  try {
-    var j = await api('bootstrap'); B = j.data;
-    $('#hTitle').textContent = B.title; $('#hSub').textContent = B.consultancy + (B.subtitle ? ' · ' + B.subtitle : '');
-    document.title = B.title;
-    go(page);
-  } catch (x) { if (!$('#login').classList.contains('hidden')) return; $('#view').innerHTML = '<div class="card err">' + esc(x.message) + '</div>'; }
+function cacheBoot(d) { try { sessionStorage.setItem('ums_boot', JSON.stringify(d)); } catch (e) {} }
+function readBoot() { try { return JSON.parse(sessionStorage.getItem('ums_boot')); } catch (e) { return null; } }
+function applyBoot(d) {
+  B = d; cacheBoot(d);
+  $('#hTitle').textContent = B.title; $('#hSub').textContent = B.consultancy + (B.subtitle ? ' · ' + B.subtitle : '');
+  document.title = B.title;
 }
+async function start(first) {
+  $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
+  var shown = false;
+  if (first) { applyBoot(first); go(page); shown = true; }
+  else {
+    var old = readBoot();                       // show the last data instantly while fresh data loads
+    if (old) { B = old; applyBoot(old); go(page); shown = true; }
+    else $('#view').innerHTML = '<div class="loading">Loading data… (first load can take a few seconds)</div>';
+    try {
+      var j = await api('bootstrap'); applyBoot(j.data);
+      if (!shown || page === 'home') go(page);
+      else if (page === 'uni' || page === 'prog') { /* keep the user's current view */ }
+    } catch (x) {
+      if (!$('#login').classList.contains('hidden')) return;
+      if (!shown) $('#view').innerHTML = '<div class="card err">' + esc(x.message) + '</div>';
+    }
+  }
+}
+$('#refresh').addEventListener('click', async function () {
+  var b = this; b.disabled = true; b.textContent = 'Refreshing…';
+  try {
+    var j = await api('bootstrap', { refresh: true }); applyBoot(j.data);
+    uniState.data = null; progState.res = null; go(page);
+  } catch (x) { alert(x.message); }
+  b.disabled = false; b.textContent = 'Refresh data';
+});
 
 document.querySelectorAll('nav button').forEach(function (b) { b.addEventListener('click', function () { go(b.dataset.p); }); });
 function go(p) {
